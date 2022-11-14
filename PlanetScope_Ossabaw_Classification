@@ -1,0 +1,477 @@
+//////////////////////////////////////////////////////////////////////////////////
+// For the final map product, you must bring the Tiff file into ArcGIS or QGIS for 
+// the best viewing.
+//////////////////////////////////////////////////////////////////////////////////
+
+// 8-band Imagery
+
+// Print Information 
+print(PS, 'PS Data 2022');
+
+// Add PS asset to map
+Map.addLayer(PS, {bands: ['b6', 'b4', 'b2'], max: 3000});
+
+// Load in false color
+Map.addLayer(PS, {bands: ['b8', 'b6', 'b4'], max: 3000});
+
+// Vegetation Indices
+
+// NDVI
+var nir = PS.select('b8');
+var red = PS.select('b6');
+var ndvi = nir.subtract(red).divide(nir.add(red)).rename('NDVI');
+
+// Display the result NDVI
+Map.centerObject(PS, 10);
+var ndviParams = {min: -1, max: 1, palette: ['blue', 'white', 'green']};
+Map.addLayer(ndvi, ndviParams, 'NDVI image');
+
+// RENDVI
+var nir = PS.select('b8');
+var rededge = PS.select('b7');
+var rendvi = nir.subtract(rededge).divide(nir.add(rededge)).rename('RENDVI');
+
+// Display the result RENDVI
+Map.centerObject(PS, 10);
+var rendviParams = {min: -1, max: 1, palette: ['blue', 'white', 'green']};
+Map.addLayer(rendvi, rendviParams, 'RENDVI image');
+
+// Add Ground Truthing Data
+Map.addLayer(Truth);
+
+// Add bands
+var VI_Stack = ee.Image([ndvi, rendvi]);
+PS = PS.addBands(VI_Stack);
+
+print('PlanetScope with VIs', PS);
+
+////// Image Classification 
+
+// Class Merging
+
+var points = ST.merge(SM).merge(SS).merge(JURO).merge(MM).merge(SPCY).merge(ZIMI).merge(Tree).merge(Bare).merge(Water).merge(Urban);
+
+print(points, 'Training data');
+
+
+
+var sample = points.randomColumn();
+
+var trainingsample = sample.filter('random <= 0.60');
+
+var validationsample = sample.filter('random > 0.40');
+
+print(trainingsample, 'Training sample');
+
+print(validationsample, 'Validation sample');
+
+
+
+var training = PS.sampleRegions({
+
+    collection: trainingsample,
+
+    properties: ['Class'],
+
+    scale: 20
+
+});
+
+print(training, 'Training data Band values');
+
+
+
+var validation = PS.sampleRegions({
+
+    collection: validationsample,
+
+    properties: ['Class'],
+
+    scale: 20
+
+});
+
+//RF Classifier Model Building
+
+//ee.Classifier.smileRandomForest(numberOfTrees, 
+
+//variablesPerSplit, minLeafPopulation, bagFraction, maxNodes, seed)
+
+var RFclassifier = ee.Classifier.smileRandomForest(500).train(training, 'Class');
+
+
+
+var Classified = PS.classify(RFclassifier);
+
+print(Classified, 'Classified');
+
+
+// Key for Cover
+
+var Palette = [
+  'orange', //ST
+  'maroon', //SM
+  'yellow', //SS
+  'pink', //JURO
+  'purple', //SPCY
+  'red', //ZIMI
+  'green', //Tree
+  'brown', //Bare
+  'blue', //Water
+  'cyan', //Urban
+  
+  ];
+Map.addLayer(Classified, {palette: Palette, min: 1, max: 7}, 'Classified map');
+
+
+
+//// Accuracy Assessment
+
+// Get a confusion matrix and overall accuracy for the training sample.
+
+var trainAccuracy = RFclassifier.confusionMatrix();
+
+print('Training error matrix', trainAccuracy);
+
+print('Training overall accuracy', trainAccuracy.accuracy());
+
+
+
+// Get a confusion matrix and overall accuracy for the validation sample.
+
+validation = validation.classify(RFclassifier);
+
+var validationAccuracy = validation.errorMatrix('Class', 'classification');
+
+print('Validation error matrix', validationAccuracy);
+
+print('Validation accuracy', validationAccuracy.accuracy());
+
+///// Variable Importance
+
+var explain = RFclassifier.explain();
+
+print(explain, 'Explain');
+
+
+
+//Variable Importance of RF Classifier
+
+var variable_importance = ee.Feature(null, ee.Dictionary(explain).get('importance'));
+
+// Chart of Variable Importance of RF Classifier
+
+var chartTitle = 'Random Forest: Bands Variable Importance';
+
+var chart =
+
+    ui.Chart.feature.byProperty(variable_importance)
+
+      .setChartType('BarChart')
+
+      .setOptions({
+
+        title: chartTitle,
+
+        legend: {position: 'none'},
+
+        hAxis: {title: 'Importance'},
+
+        vAxis: {title: 'Bands'}
+
+      });
+
+// Chart: Location and Plot
+
+chart.style().set({
+
+  position: 'bottom-left',
+
+  width: '400px',
+
+  height: '400px'
+
+});
+
+Map.add(chart);
+
+////// Export
+
+Export.image.toDrive({
+
+  image: Classified,
+
+  description: 'HMC_OssabawHUC_Classification',
+
+  region: PS,
+
+  scale: 20,
+  crs: 'EPSG:6346',
+
+  fileFormat: 'GeoTIFF',
+
+  maxPixels: 1e9,
+
+});
+
+// Export Feature Collections to Drive
+
+var features = ee.FeatureCollection([
+  ee.Feature(ST),
+  ee.Feature(SM),
+  ee.Feature(SS),
+  ee.Feature(JURO),
+  ee.Feature(MM),
+  ee.Feature(SPCY),
+  ee.Feature(ZIMI),
+  ee.Feature(Tree),
+  ee.Feature(Bare),
+  ee.Feature(Water),
+  ee.Feature(Urban),
+    ]);
+    
+  // Export as a KML
+  
+Export.table.toDrive({
+  collection: features,
+  description:'vectorsToDriveExample',
+  fileFormat: 'CSV'
+});
+
+// Stats per class
+
+
+
+
+/////////////////////////////////
+/////////////////////////////////
+// 4-band Classification
+////////////////////////////////
+///////////////////////////////
+
+// Print Information 
+print(PS1, '4-band PS Data 2022');
+
+// Add PS asset to map
+Map.addLayer(PS1, {bands: ['b3', 'b2', 'b1'], max: 3000});
+
+// Load in false color
+Map.addLayer(PS, {bands: ['b4', 'b3', 'b2'], max: 3000});
+
+// Vegetation Indices
+
+// NDVI
+var nir = PS.select('b4');
+var red = PS.select('b3');
+var ndvi = nir.subtract(red).divide(nir.add(red)).rename('NDVI');
+
+// Display the result NDVI
+Map.centerObject(PS, 10);
+var ndviParams = {min: -1, max: 1, palette: ['blue', 'white', 'green']};
+Map.addLayer(ndvi, ndviParams, '4-band NDVI image');
+
+// Add Ground Truthing Data
+Map.addLayer(Truth);
+
+// Add bands
+var VI_Stack1 = ee.Image([ndvi]);
+PS1 = PS1.addBands(VI_Stack1);
+
+print('PlanetScope with VIs', PS1);
+
+////// Image Classification 
+
+// Class Merging
+
+var points = ST.merge(SM).merge(SS).merge(JURO).merge(MM).merge(SPCY).merge(ZIMI).merge(Tree).merge(Bare).merge(Water).merge(Urban);
+
+print(points, 'Training data');
+
+
+
+var sample = points.randomColumn();
+
+var trainingsample = sample.filter('random <= 0.60');
+
+var validationsample = sample.filter('random > 0.40');
+
+print(trainingsample, 'Training sample');
+
+print(validationsample, 'Validation sample');
+
+
+
+var training = PS1.sampleRegions({
+
+    collection: trainingsample,
+
+    properties: ['Class'],
+
+    scale: 20
+
+});
+
+print(training, 'Training data Band values');
+
+
+
+var validation = PS1.sampleRegions({
+
+    collection: validationsample,
+
+    properties: ['Class'],
+
+    scale: 20
+
+});
+
+//RF Classifier Model Building
+
+//ee.Classifier.smileRandomForest(numberOfTrees, 
+
+//variablesPerSplit, minLeafPopulation, bagFraction, maxNodes, seed)
+
+var RFclassifier = ee.Classifier.smileRandomForest(500).train(training, 'Class');
+
+
+
+var Classified = PS1.classify(RFclassifier);
+
+print(Classified, 'Classified');
+
+
+// Key for Cover
+
+var Palette = [
+  'orange', //ST
+  'maroon', //SM
+  'yellow', //SS
+  'pink', //JURO
+  'purple', //SPCY
+  'red', //ZIMI
+  'green', //Tree
+  'brown', //Bare
+  'blue', //Water
+  'cyan', //Urban
+  
+  ];
+Map.addLayer(Classified, {palette: Palette, min: 1, max: 7}, 'Classified map');
+
+
+
+//// Accuracy Assessment
+
+// Get a confusion matrix and overall accuracy for the training sample.
+
+var trainAccuracy = RFclassifier.confusionMatrix();
+
+print('Training error matrix', trainAccuracy);
+
+print('Training overall accuracy', trainAccuracy.accuracy());
+
+
+
+// Get a confusion matrix and overall accuracy for the validation sample.
+
+validation = validation.classify(RFclassifier);
+
+var validationAccuracy = validation.errorMatrix('Class', 'classification');
+
+print('Validation error matrix', validationAccuracy);
+
+print('Validation accuracy', validationAccuracy.accuracy());
+
+///// Variable Importance
+
+var explain = RFclassifier.explain();
+
+print(explain, 'Explain');
+
+
+
+//Variable Importance of RF Classifier
+
+var variable_importance = ee.Feature(null, ee.Dictionary(explain).get('importance'));
+
+// Chart of Variable Importance of RF Classifier
+
+var chartTitle = 'Random Forest: Bands Variable Importance';
+
+var chart =
+
+    ui.Chart.feature.byProperty(variable_importance)
+
+      .setChartType('BarChart')
+
+      .setOptions({
+
+        title: chartTitle,
+
+        legend: {position: 'none'},
+
+        hAxis: {title: 'Importance'},
+
+        vAxis: {title: 'Bands'}
+
+      });
+
+// Chart: Location and Plot
+
+chart.style().set({
+
+  position: 'bottom-left',
+
+  width: '400px',
+
+  height: '400px'
+
+});
+
+Map.add(chart);
+
+////// Export
+
+Export.image.toDrive({
+
+  image: Classified,
+
+  description: 'HMC_4Band_OssabawHUC_Classification',
+
+  region: PS1,
+
+  scale: 20,
+  crs: 'EPSG:6346',
+
+  fileFormat: 'GeoTIFF',
+
+  maxPixels: 1e9,
+
+});
+
+// Export Feature Collections to Drive
+
+var features = ee.FeatureCollection([
+  ee.Feature(ST),
+  ee.Feature(SM),
+  ee.Feature(SS),
+  ee.Feature(JURO),
+  ee.Feature(MM),
+  ee.Feature(SPCY),
+  ee.Feature(ZIMI),
+  ee.Feature(Tree),
+  ee.Feature(Bare),
+  ee.Feature(Water),
+  ee.Feature(Urban),
+    ]);
+    
+  // Export as a KML
+  
+Export.table.toDrive({
+  collection: features,
+  description:'vectorsToDriveExample',
+  fileFormat: 'CSV'});
+
+
+//////////////////////////////////////
+// HMC: Georgia Southern University
+//////////////////////////////////////
